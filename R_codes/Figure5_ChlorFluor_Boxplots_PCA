@@ -1,0 +1,188 @@
+library(ggplot2)
+library(dplyr)
+library(patchwork)
+library(ggrepel)
+
+# -------------------------------
+# 1. Define your group colors
+# -------------------------------
+group_colors <- c(
+  "tt4_RG_UV" = "red3",
+  "tt4_RGB_UV" = "deepskyblue4",
+  "tt4_WT_RG_UV" = "darkorchid4",
+  "tt4_WT_RGB_UV" = "midnightblue",
+  "tt4_RG_control" = "violet",
+  "tt4_RGB_control" = "deepskyblue3",
+  "tt4_WT_RG_control" = "darkorchid",
+  "tt4_WT_RGB_control" = "cornflowerblue",
+  "cry_RG_UV" = "red3",
+  "cry_RGB_UV" = "deepskyblue4",
+  "cry_WT_RG_UV" = "darkorchid4",
+  "cry_WT_RGB_UV" = "midnightblue",
+  "cry_RG_control" = "violet",
+  "cry_RGB_control" = "deepskyblue3",
+  "cry_WT_RG_control" = "darkorchid",
+  "cry_WT_RGB_control" = "cornflowerblue"
+)
+
+# Keep only colors for groups present in Chlor_Fluor_Pigment_data
+group_colors <- group_colors[unique(Chlor_Fluor_Pigment_data$Group)]
+
+# -------------------------------
+# 2. Boxplots
+# -------------------------------
+
+# Boxplot 1: QY_max
+p1 <- ggplot(Chlor_Fluor_Pigment_data, aes(x=Group, y=QY_max, fill=Group)) +
+  geom_boxplot(outlier.shape = NA, alpha=0.75) +
+  geom_jitter(width=0.2, size=2, alpha=0.5) +
+  scale_fill_manual(values=group_colors) +
+  theme_minimal(base_size=14) +
+  theme(axis.text.x = element_text(angle=45, hjust=1),
+        legend.position = "none") +
+  labs(title="QY_max by Group", x=NULL, y="QY_max")
+
+# Boxplot 2: NPQ_Lss
+p2 <- ggplot(Chlor_Fluor_Pigment_data, aes(x=Group, y=NPQ_Lss, fill=Group)) +
+  geom_boxplot(outlier.shape = NA, alpha=0.75) +
+  geom_jitter(width=0.2, size=2, alpha=0.5) +
+  scale_fill_manual(values=group_colors) +
+  theme_minimal(base_size=14) +
+  theme(axis.text.x = element_text(angle=45, hjust=1),
+        legend.position = "none") +
+  labs(title="NPQ_Lss by Group", x=NULL, y="NPQ_Lss")
+
+
+# -------------------------------
+# 3. Combine side-by-side
+# -------------------------------
+p1 + p2 
+
+
+
+#####
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+library(grid)
+
+# -------------------------------
+# 1. Define your variables and colors
+# -------------------------------
+fluoro_vars <- c("QY_max", "NPQ_Lss", "Flavonoids")
+metabolites <- c("p-coumaric acid", "Isovitexin", "Protocatechuic acid", "Sinapic acid", 
+                 "Quercetin", "Kaempferol", "Luteolin", "Homoorientin", "Saponarin")
+
+variables <- c(fluoro_vars, metabolites)
+var_colors <- c("green4", "green3", "goldenrod",  
+                "grey30", "grey30", "red", "grey30", 
+                "grey30", "grey30", "grey30", "grey30", "grey30")
+names(var_colors) <- variables  # assign colors to variables
+
+# -------------------------------
+# 2. Clean HPLC data and log-transform
+# -------------------------------
+HPLC_sub <- HPLC_data %>%
+  select(Group, all_of(metabolites)) %>%
+  mutate(across(all_of(metabolites), ~ as.numeric(gsub(",", ".", as.character(.x))))) %>%
+  mutate(across(all_of(metabolites), ~ log10(.x + 1)))
+
+# Remove extreme outliers (optional)
+iqr_multiplier <- 3
+for(met in metabolites){
+  Q1 <- quantile(HPLC_sub[[met]], 0.25, na.rm=TRUE)
+  Q3 <- quantile(HPLC_sub[[met]], 0.75, na.rm=TRUE)
+  IQR_val <- Q3 - Q1
+  lower <- Q1 - iqr_multiplier*IQR_val
+  upper <- Q3 + iqr_multiplier*IQR_val
+  HPLC_sub[[met]][HPLC_sub[[met]] < lower | HPLC_sub[[met]] > upper] <- NA
+}
+
+# -------------------------------
+# 3. Aggregate by Group (mean)
+# -------------------------------
+Chlor_Fluor_Pigment_data_agg <- Chlor_Fluor_Pigment_data %>%
+  select(Group, all_of(fluoro_vars)) %>%
+  group_by(Group) %>%
+  summarise(across(all_of(fluoro_vars), ~ mean(.x, na.rm=TRUE)), .groups="drop")
+
+HPLC_agg <- HPLC_sub %>%
+  group_by(Group) %>%
+  summarise(across(all_of(metabolites), ~ mean(.x, na.rm=TRUE)), .groups="drop")
+
+data_agg <- Chlor_Fluor_Pigment_data_agg %>% left_join(HPLC_agg, by="Group")
+
+# -------------------------------
+# 4. Run PCA
+# -------------------------------
+PCA_numeric <- data_agg %>% select(all_of(c(fluoro_vars, metabolites)))
+pca_result <- prcomp(PCA_numeric, scale.=TRUE)
+
+# Percent variance explained
+var_explained <- pca_result$sdev^2 / sum(pca_result$sdev^2) * 100
+
+pc1_lab <- paste0("PC1 (", round(var_explained[1], 1), "%)")
+pc2_lab <- paste0("PC2 (", round(var_explained[2], 1), "%)")
+
+
+# Scores for plotting
+scores <- as.data.frame(pca_result$x)
+scores$Group <- data_agg$Group
+
+# Loadings for arrows
+loadings <- as.data.frame(pca_result$rotation[,1:2])
+loadings$Variable <- rownames(loadings)
+
+# Scale arrows for plotting
+arrow_scale <- 3
+loadings <- loadings %>%
+  mutate(PC1 = PC1 * arrow_scale,
+         PC2 = PC2 * arrow_scale)
+
+# -------------------------------
+# 5. Plot PCA biplot with arrows and labeled points
+# -------------------------------
+ggplot() +
+  # Points for groups (NOW COLORED BY GROUP)
+  geom_point(
+    data = scores,
+    aes(x = PC1, y = PC2, color = Group),
+    size = 4
+  ) +
+  
+  # Labels for points (same group colors)
+  geom_text_repel(
+    data = scores,
+    aes(x = PC1, y = PC2, label = Group, color = Group),
+    size = 4,
+    show.legend = FALSE
+  ) +
+  
+  # Arrows for variables (still colored by variable)
+  geom_segment(
+    data = loadings,
+    aes(x = 0, y = 0, xend = PC1, yend = PC2, color = Variable),
+    arrow = arrow(length = unit(0.3, "cm")),
+    size = 1
+  ) +
+  
+  # Labels for arrows
+  geom_text_repel(
+    data = loadings,
+    aes(x = PC1, y = PC2, label = Variable, color = Variable),
+    size = 5,
+    segment.color = "black"
+  ) +
+  
+  # TWO color scales: one for points, one for arrows
+  scale_color_manual(
+    values = c(group_colors, var_colors),
+    breaks = names(group_colors)   # legend shows groups, not variables
+  ) +
+  
+    theme_minimal(base_size = 14) +
+  labs(
+    title = "PCA Biplot",
+    x = pc1_lab,
+    y = pc2_lab
+  )
