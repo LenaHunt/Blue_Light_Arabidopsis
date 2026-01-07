@@ -1,0 +1,110 @@
+# Load libraries for PCA
+library(dplyr)
+library(FactoMineR)
+library(factoextra)
+
+
+# Select metabolites
+selected_metabolites <- c(
+  "Protocatechuic acid", "p-coumaric acid", "Isovitexin", "Sinapic acid",
+  "Luteolin", "Kaempferol", "Homoorientin", "Quercetin",
+  "Saponarin"
+)
+
+# tt4 colors
+tt4_colors <- c(
+  "tt4_RG_UV" = "red3",
+  "tt4_RGB_UV" = "deepskyblue4",
+  "tt4_WT_RG_UV" = "darkorchid4",
+  "tt4_WT_RGB_UV" = "midnightblue",
+  "tt4_RG_control" = "violet",
+  "tt4_RGB_control" = "deepskyblue3",
+  "tt4_WT_RG_control" = "darkorchid",
+  "tt4_WT_RGB_control" = "cornflowerblue"
+)
+
+# cry colors
+cry_colors <- c(
+  "cry_RG_UV" = "red3",
+  "cry_RGB_UV" = "deepskyblue4",
+  "cry_WT_RG_UV" = "darkorchid4",
+  "cry_WT_RGB_UV" = "midnightblue",
+  "cry_RG_control" = "violet",
+  "cry_RGB_control" = "deepskyblue3",
+  "cry_WT_RG_control" = "darkorchid",
+  "cry_WT_RGB_control" = "cornflowerblue"
+)
+
+
+# PCA for tt4
+tt4_data <- HPLC_data %>%
+  filter(grepl("tt4", Group)) %>%
+  select(genotype, light, treatment, Group, all_of(selected_metabolites))
+
+# Convert metabolites to numeric
+tt4_data[selected_metabolites] <- lapply(tt4_data[selected_metabolites], function(x) {
+  suppressWarnings(as.numeric(gsub(",", ".", gsub(" ", "", x))))
+})
+
+# Log-transform
+tt4_data[selected_metabolites] <- log10(tt4_data[selected_metabolites] + 1)
+
+# Remove NAs
+tt4_clean <- drop_na(tt4_data)
+
+# PCA
+tt4_pca <- PCA(tt4_clean[selected_metabolites], scale.unit = TRUE, graph = FALSE)
+
+# Plot
+fviz_pca_biplot(
+  tt4_pca,
+  geom.ind = "point",
+  pointshape = 16,
+  pointsize = 3,
+  col.ind = tt4_clean$Group,
+  palette = tt4_colors,
+  addEllipses = TRUE,
+  ellipse.type = "convex",
+  repel = TRUE,
+  geom.var = c("arrow", "text"),
+  col.var = "black"
+) +
+  theme_minimal(base_size = 14) +
+  labs(title = "PCA Biplot of tt4 and wild type")
+
+
+# PCA for cry
+cry_data <- HPLC_data %>%
+  filter(grepl("cry", Group)) %>%
+  select(genotype, light, treatment, Group, all_of(selected_metabolites))
+
+# Convert metabolites to numeric
+cry_data[selected_metabolites] <- lapply(cry_data[selected_metabolites], function(x) {
+  suppressWarnings(as.numeric(gsub(",", ".", gsub(" ", "", x))))
+})
+
+# Log-transform
+cry_data[selected_metabolites] <- log10(cry_data[selected_metabolites] + 1)
+
+# Remove NAs
+cry_clean <- drop_na(cry_data)
+
+# PCA
+cry_pca <- PCA(cry_clean[selected_metabolites], scale.unit = TRUE, graph = FALSE)
+
+# Plot
+fviz_pca_biplot(
+  cry_pca,
+  geom.ind = "point",
+  pointshape = 16,
+  pointsize = 3,
+  col.ind = cry_clean$Group,
+  palette = cry_colors,
+  addEllipses = TRUE,
+  ellipse.type = "convex",
+  repel = TRUE,
+  geom.var = c("arrow", "text"),
+  col.var = "black"
+) +
+  theme_minimal(base_size = 14) +
+  labs(title = "PCA Biplot of cry1cry2 and wild type")
