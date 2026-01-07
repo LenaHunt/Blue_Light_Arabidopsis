@@ -1,0 +1,42 @@
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+
+# Metadata columns
+meta_cols <- c("genotype", "light", "treatment", "Group")
+metabolite_cols <- setdiff(colnames(HPLC_data), meta_cols)
+
+# Make sure metabolite columns are numeric
+HPLC_data_numeric <- HPLC_data
+HPLC_data_numeric[metabolite_cols] <- lapply(HPLC_data_numeric[metabolite_cols], function(x) {
+  as.numeric(gsub(",", ".", x))
+})
+
+# Calculate relative abundance (%) per sample
+HPLC_relative <- HPLC_data_numeric %>%
+  rowwise() %>%
+  mutate(total = sum(c_across(all_of(metabolite_cols)), na.rm = TRUE)) %>%
+  mutate(across(all_of(metabolite_cols), ~ .x / total * 100, .names = "{.col}_perc")) %>%
+  ungroup()
+
+# Pivot to long format
+met_perc_cols <- paste0(metabolite_cols, "_perc")
+HPLC_long <- HPLC_relative %>%
+  select(all_of(meta_cols), all_of(met_perc_cols)) %>%
+  pivot_longer(cols = all_of(met_perc_cols),
+               names_to = "Metabolite",
+               values_to = "Relative_abundance") %>%
+  mutate(Metabolite = gsub("_perc$", "", Metabolite)) %>%
+  mutate(highlight = ifelse(Metabolite == "Sinapic acid", "Sinapic acid", "Other"))
+
+# Plot relative abundance
+ggplot(HPLC_long, aes(x = Metabolite, y = Relative_abundance, fill = highlight)) +
+  geom_boxplot(outlier.shape = NA) +
+  geom_jitter(width = 0.2, size = 1, alpha = 0.6) +
+  scale_fill_manual(values = c("Sinapic acid" = "red3", "Other" = "grey70")) +
+  theme_minimal(base_size = 14) +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  labs(y = "Relative abundance (%)", x = "Metabolite") +
+  guides(fill = FALSE)
+
+ggsave("Figure_1.pdf", width = 10, height = 7)
