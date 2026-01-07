@@ -1,0 +1,230 @@
+# Metabolite boxplots! 
+# Supplemental S2
+
+# Load libraries
+library(dplyr)
+library(tidyr)
+library(ggplot2)
+library(patchwork)
+library(openxlsx)
+library(rlang)
+
+
+# Clean data and log transform
+
+# Metadata columns
+meta_cols <- c("genotype", "light", "treatment", "Group")
+metabolite_cols <- setdiff(colnames(HPLC_data), meta_cols)
+
+# Clean numeric columns
+HPLC_data_clean <- HPLC_data
+HPLC_data_clean[metabolite_cols] <- lapply(HPLC_data[metabolite_cols], function(x) {
+  suppressWarnings(as.numeric(gsub(",", ".", x)))
+})
+
+# Remove zero-variance metabolites
+zero_var <- sapply(HPLC_data_clean[metabolite_cols], function(x) var(x, na.rm = TRUE) == 0)
+metabolite_cols <- metabolite_cols[!zero_var]
+HPLC_data_clean <- HPLC_data_clean[, c(meta_cols, metabolite_cols)]
+
+# Outlier removal (loose, IQR multiplier = 4)
+HPLC_raw_no_outliers <- HPLC_data_clean
+iqr_multiplier <- 4
+for (met in metabolite_cols) {
+  Q1 <- quantile(HPLC_raw_no_outliers[[met]], 0.25, na.rm = TRUE)
+  Q3 <- quantile(HPLC_raw_no_outliers[[met]], 0.75, na.rm = TRUE)
+  IQRv <- Q3 - Q1
+  lower <- Q1 - iqr_multiplier * IQRv
+  upper <- Q3 + iqr_multiplier * IQRv
+  HPLC_raw_no_outliers[[met]][HPLC_raw_no_outliers[[met]] < lower |
+                                HPLC_raw_no_outliers[[met]] > upper] <- NA
+}
+
+# Log-transform for plotting
+HPLC_log_no_outliers <- HPLC_raw_no_outliers
+HPLC_log_no_outliers[metabolite_cols] <- log10(HPLC_log_no_outliers[metabolite_cols] + 1)
+HPLC_log_no_outliers$Group <- factor(HPLC_log_no_outliers$Group)
+
+
+# WT vs mutant comparisons
+wt_vs_mutant <- data.frame(
+  Group1 = c(
+    "cry_WT_RG_control","cry_WT_RGB_control",
+    "cry_WT_RG_UV","cry_WT_RGB_UV",
+    "tt4_WT_RG_control","tt4_WT_RGB_control",
+    "tt4_WT_RG_UV","tt4_WT_RGB_UV"
+  ),
+  Group2 = c(
+    "cry_RG_control","cry_RGB_control",
+    "cry_RG_UV","cry_RGB_UV",
+    "tt4_RG_control","tt4_RGB_control",
+    "tt4_RG_UV","tt4_RGB_UV"
+  )
+)
+
+run_comparisons <- function(comparison_list, data_raw, outfile_all, outfile_sig) {
+  results <- data.frame()
+  
+  for (met in metabolite_cols) {
+    for (i in 1:nrow(comparison_list)) {
+      g1 <- comparison_list$Group1[i]
+      g2 <- comparison_list$Group2[i]
+      
+      x1 <- data_raw[[met]][data_raw$Group == g1]
+      x2 <- data_raw[[met]][data_raw$Group == g2]
+      
+      # Keep only if both groups have >=3 data points
+      x1 <- x1[!is.na(x1)]
+      x2 <- x2[!is.na(x2)]
+      
+      if (length(x1) >= 3 & length(x2) >= 3) {
+        p_val <- wilcox.test(x1, x2, exact = FALSE)$p.value
+        m1 <- mean(x1)
+        sd1 <- sd(x1)
+        m2 <- mean(x2)
+        sd2 <- sd(x2)
+        fold <- m1 / m2
+        dir <- ifelse(m1 > m2, "up", "down")
+      } else {
+        p_val <- m1 <- sd1 <- m2 <- sd2 <- fold <- dir <- NA
+      }
+      
+      results <- rbind(results, data.frame(
+        Metabolite = met,
+        Group1 = g1,
+        Group2 = g2,
+        mean_Group1 = m1,
+        sd_Group1 = sd1,
+        mean_Group2 = m2,
+        sd_Group2 = sd2,
+        fold_change = fold,
+        direction = dir,
+        p_value = p_val
+      ))
+    }
+  }
+  
+  # Save Excel files
+  write.xlsx(results, outfile_all, rowNames = FALSE)
+  write.xlsx(filter(results, !is.na(p_value) & p_value < 0.05), outfile_sig, rowNames = FALSE)
+  
+  # Return list of significant metabolites
+  sig_mets <- unique(filter(results, !is.na(p_value) & p_value < 0.05)$Metabolite)
+  return(sig_mets)
+}
+
+# Run comparisons
+sig_metabolites <- run_comparisons(
+  wt_vs_mutant,
+  HPLC_raw_no_outliers,
+  "TableS1-all_metabolite_comparisons_WT_vs_mutant.xlsx",
+  "significant_metabolite_comparisons_WT_vs_mutant.xlsx"
+)
+
+
+# Plot metabolites individually
+
+group_colors <- c(
+  "cry_RG_UV" = "red3","cry_RGB_UV" = "blue3",
+  "cry_WT_RG_UV" = "red4","cry_WT_RGB_UV" = "midnightblue",
+  "tt4_RG_UV" = "red3","tt4_RGB_UV" = "blue3",
+  "tt4_WT_RG_UV" = "red4","tt4_WT_RGB_UV" = "midnightblue",
+  "cry_RG_control" = "violet","cry_RGB_control" = "skyblue",
+  "cry_WT_RG_control" = "purple","cry_WT_RGB_control" = "dodgerblue",
+  "tt4_RG_control" = "violet","tt4_RGB_control" = "skyblue",
+  "tt4_WT_RG_control" = "purple","tt4_WT_RGB_control" = "dodgerblue"
+)
+
+plot_metabolite <- function(met) {
+  if (all(is.na(HPLC_log_no_outliers[[met]]))) return(NULL)
+  
+  highlight <- ifelse(met == "Sinapic_acid", "Sinapic acid", met)
+  
+  ggplot(HPLC_log_no_outliers, aes(x = Group, y = .data[[met]], fill = Group)) +
+    geom_boxplot(outlier.shape = NA, alpha = 0.6) +
+    scale_fill_manual(values = group_colors) +
+    theme_minimal(base_size = 14) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1),
+          legend.position = "none") +
+    labs(title = paste("Levels of", highlight), y = paste(met, "(log10)"), x = "Group") +
+    ylim(0, 10)
+}
+
+plot_list <- list()
+for (met in sig_metabolites) {
+  p <- plot_metabolite(met)
+  if (!is.null(p)) {
+    print(p)         # print to R environment
+    plot_list[[met]] <- p
+  }
+}
+
+# Save each metabolite plot on a separate page
+pdf("Box_plots_of_metabolites.pdf", width = 10, height = 7)  # adjust height as needed
+
+for (p in plot_list) {
+  print(p)  # each plot goes on a new page
+}
+
+dev.off()
+
+#################################
+
+# Just plots of tt4 for Figure 3
+# Load libraries
+library(dplyr)
+library(ggplot2)
+library(rstatix)
+library(ggpubr)
+library(broom)
+library(multcompView)
+
+
+# Filter for tt4 groups only
+HPLC_tt4 <- HPLC_no_outliers %>% 
+  filter(grepl("tt4", Group, ignore.case = TRUE))
+
+HPLC_tt4$Group <- droplevels(HPLC_tt4$Group)
+
+---
+  # Select the four metabolites
+  ---
+  final_metabolites <- c("Homoorientin", "Saponarin", "Luteolin", "Quercetin")
+final_metabolites <- intersect(final_metabolites, colnames(HPLC_tt4))   # ensure they exist
+
+
+# Plotting function
+
+plot_metabolite <- function(met) {
+  if (all(is.na(HPLC_tt4[[met]]))) return(NULL)
+  
+  ggplot(HPLC_tt4,
+         aes(x = Group, y = .data[[met]], fill = Group)) +
+    geom_boxplot(outlier.shape = NA, color = "black", alpha = 0.6) +
+    scale_fill_manual(values = group_colors, guide = "none") +  # remove legend
+    theme_minimal(base_size = 14) +
+    theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+    labs(title = paste("Levels of", met, "by Group"),
+         x = "Group",
+         y = paste(met, "(log10)")) +
+    ylim(0, 10)
+}
+
+
+# Generate plots
+
+plots <- lapply(final_metabolites, plot_metabolite)
+
+
+# Save 4 plots on one PDF page
+
+pdf("HPLC_tt4_4metabolites.pdf", width = 8, height = 11)
+
+ggarrange(
+  plotlist = plots,
+  ncol = 2,   # 2 columns
+  nrow = 2    # 2 rows
+)
+
+dev.off()
+
