@@ -1,11 +1,10 @@
+# Load libraries for the boxplots
 library(ggplot2)
 library(dplyr)
 library(patchwork)
 library(ggrepel)
 
-# -------------------------------
-# 1. Define your group colors
-# -------------------------------
+# Define your group colors
 group_colors <- c(
   "tt4_RG_UV" = "red3",
   "tt4_RGB_UV" = "deepskyblue4",
@@ -28,9 +27,9 @@ group_colors <- c(
 # Keep only colors for groups present in Chlor_Fluor_Pigment_data
 group_colors <- group_colors[unique(Chlor_Fluor_Pigment_data$Group)]
 
-# -------------------------------
-# 2. Boxplots
-# -------------------------------
+
+# Create the boxplots
+
 
 # Boxplot 1: QY_max
 p1 <- ggplot(Chlor_Fluor_Pigment_data, aes(x=Group, y=QY_max, fill=Group)) +
@@ -53,22 +52,20 @@ p2 <- ggplot(Chlor_Fluor_Pigment_data, aes(x=Group, y=NPQ_Lss, fill=Group)) +
   labs(title="NPQ_Lss by Group", x=NULL, y="NPQ_Lss")
 
 
-# -------------------------------
-# 3. Combine side-by-side
-# -------------------------------
+
+# Combine the boxplots side-by-side
 p1 + p2 
 
 
 
-#####
+# Load libraries for the PCA
 library(dplyr)
 library(ggplot2)
 library(ggrepel)
 library(grid)
 
-# -------------------------------
-# 1. Define your variables and colors
-# -------------------------------
+
+# Define variables and colors
 fluoro_vars <- c("QY_max", "NPQ_Lss", "Flavonoids")
 metabolites <- c("p-coumaric acid", "Isovitexin", "Protocatechuic acid", "Sinapic acid", 
                  "Quercetin", "Kaempferol", "Luteolin", "Homoorientin", "Saponarin")
@@ -79,15 +76,14 @@ var_colors <- c("green4", "green3", "goldenrod",
                 "grey30", "grey30", "grey30", "grey30", "grey30")
 names(var_colors) <- variables  # assign colors to variables
 
-# -------------------------------
-# 2. Clean HPLC data and log-transform
-# -------------------------------
+
+# Clean HPLC data and log-transform
 HPLC_sub <- HPLC_data %>%
   select(Group, all_of(metabolites)) %>%
   mutate(across(all_of(metabolites), ~ as.numeric(gsub(",", ".", as.character(.x))))) %>%
   mutate(across(all_of(metabolites), ~ log10(.x + 1)))
 
-# Remove extreme outliers (optional)
+# Remove extreme outliers
 iqr_multiplier <- 3
 for(met in metabolites){
   Q1 <- quantile(HPLC_sub[[met]], 0.25, na.rm=TRUE)
@@ -98,9 +94,8 @@ for(met in metabolites){
   HPLC_sub[[met]][HPLC_sub[[met]] < lower | HPLC_sub[[met]] > upper] <- NA
 }
 
-# -------------------------------
-# 3. Aggregate by Group (mean)
-# -------------------------------
+
+# Aggregate by Group (mean)
 Chlor_Fluor_Pigment_data_agg <- Chlor_Fluor_Pigment_data %>%
   select(Group, all_of(fluoro_vars)) %>%
   group_by(Group) %>%
@@ -112,9 +107,8 @@ HPLC_agg <- HPLC_sub %>%
 
 data_agg <- Chlor_Fluor_Pigment_data_agg %>% left_join(HPLC_agg, by="Group")
 
-# -------------------------------
-# 4. Run PCA
-# -------------------------------
+
+# Run PCA
 PCA_numeric <- data_agg %>% select(all_of(c(fluoro_vars, metabolites)))
 pca_result <- prcomp(PCA_numeric, scale.=TRUE)
 
@@ -139,11 +133,10 @@ loadings <- loadings %>%
   mutate(PC1 = PC1 * arrow_scale,
          PC2 = PC2 * arrow_scale)
 
-# -------------------------------
-# 5. Plot PCA biplot with arrows and labeled points
-# -------------------------------
+
+# Plot PCA biplot with arrows and labeled points
 ggplot() +
-  # Points for groups (NOW COLORED BY GROUP)
+  # Points for groups (colored by group)
   geom_point(
     data = scores,
     aes(x = PC1, y = PC2, color = Group),
@@ -158,7 +151,7 @@ ggplot() +
     show.legend = FALSE
   ) +
   
-  # Arrows for variables (still colored by variable)
+  # Arrows for variables (colored by variable)
   geom_segment(
     data = loadings,
     aes(x = 0, y = 0, xend = PC1, yend = PC2, color = Variable),
@@ -174,7 +167,7 @@ ggplot() +
     segment.color = "black"
   ) +
   
-  # TWO color scales: one for points, one for arrows
+  # two color scales: one for points, one for arrows
   scale_color_manual(
     values = c(group_colors, var_colors),
     breaks = names(group_colors)   # legend shows groups, not variables
